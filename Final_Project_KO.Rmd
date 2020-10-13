@@ -1,0 +1,176 @@
+---
+title: "Final Project"
+author: "Kevin Ovendorf"
+date: "8/3/2020"
+output: html_document
+runtime: shiny
+---
+
+## Introduction: Domain problem characterization
+
+  As the era of data continues, we can start to see it flood into our everyday lives more and more if you are observant enough. Sports, specifically basketball, is no exception to this. The NBA is composed of 30 teams, each with a limited roster of players. The coach is tasked simply with organizing the team and determining a strategy to ensure they win as many games as possible with hopes of winning the NBA title at the end of the season. This is a somewhat daunting job but thankful the coach does not have to do it by his or herself, thanks to the NBA and their open source data, with the right tools the teams can gain access to a plethora of insight on how to improve and become the best team possible. 
+
+  In basketball, if you simplify it down enough, simply put the team with the most points at the end of the game wins; wouldn't it be nice if we could track exactly where a team and its players are most accurate on the court, as well as knowing this for their opponents to better defend them? Well, that is the point of the tool that is going to be built here.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(shiny)
+library(shinythemes)
+library(plotly)
+library(tidyverse)
+library(rsconnect)
+library(readr)
+library(ggplot2)
+library(plyr)
+library(dplyr)
+library(jpeg)
+library(grid)
+library(RCurl)
+library(shinyWidgets)
+```
+
+```{r file imports, message=FALSE, warning=FALSE}
+# import all NBA teams csv files into one dataframe
+mydir = "NBA Teams 2017-2018"
+myfiles = list.files(path = mydir, pattern = "*.csv", full.names = TRUE)
+myfiles
+
+# declare csv file
+data_csv = ldply(myfiles, read_csv)
+
+# upload image of court for ggplot
+courtImg <- "http://robslink.com/SAS/democd54/nba_court_dimensions.jpg"
+court <- rasterGrob(readJPEG(getURLContent(courtImg)),
+                    width = unit(1, "npc"), height = unit(1, "npc"))
+```
+
+## Data/operation abstraction design:
+
+To begin, all data was downloaded from NBAsavant.com. Each team has their own csv file for the 2017-2018 season which was the most recent dataset available from their website. All 30 datasets consist of 22 variables as shown below in the code chunk:
+
+```{r variable names, message=FALSE, warning=FALSE}
+# view all variable names
+names(data_csv)
+```
+The most important columns that will be used to subset the data and allow for user interactivity and exploration are: "name", "team_name", "shot_type", "shot_made_flag", and "action_type". The "name" and "team_name" variable allow the user to select teams and each selected teams players who scored at least 1 point in the 2017-18 season. From there. "shot_type" allows the user to choose between a 2 point shot, or a 3 point shot, or both. "shot_made_flag" gives users the access to filter out if the shot was made or not, and lastly "action_type" is a description of the shot itself, which according to the NBA, there are a total of 65 different ways to put the basketball through the hoop to score.
+
+  To allow more flexibility from the user, all 30 dataframes were merged into a single dataframe titled "data_csv" from a singular folder "NBA Teams 2017-2018" which allowed for a batch import. This was important to do because it enables the user to select multiple teams at once, which prior would have required multiple dataframes being filtered instead of a simple master dataframe which overall reduced the complexity and layering of the code.
+  
+```{r dataset, message=FALSE, warning=FALSE}
+# view the dataset to get a better understanding of why and how it was processed
+head(data_csv, 5)
+```
+  
+  The final file that was uploaded was a pixel-accurate image of one half of a basketball court. This image was crucial in the plotting of the shots as it gave the user a map to see exactly where on the court the shots were being taken. The reason only half a court was used instead of a full court is because of the extremely small amount of shots that occur from beyond the halfway line, and because of this, when assigning boundaries to the plot points, all shots that occurred from outside of half court where dropped. These points are not necessary as full court shots are not an essential part of basketball and understanding a players scoring ability.
+  
+```{r court, message=FALSE, warning=FALSE}
+# view the image used as a background/map for the data
+ggplot() +
+  annotation_custom(court, -250, 250, -50, 420) + # labels for x and y axis
+            xlim(-250, 250) + # pixel boundaries of the width of the basketball court 
+            ylim(-50, 420) # pixel boundaries of the height of the basketball court
+```
+## Encoding/Interaction design:
+
+  While the design for the data is overall efficient and very accurate, there is still room for improvements. Positive aspects of the design is that the black contrasting background is easy on the eyes and directs your attention to the interactive portion of the dashboard which make it user friendly. The underlying code that filter through the data based on every input is very helpful too if the user is looking for a very specific output, which scales nicely if a user was to also have very broad parameters in mind. 
+  
+  Important features to note are reactivity of the inputs. This reactiveness gives results after every single input is defined and does not require every input to be defined either, so it is extremely flexible and allows the user to really test the robustness of the plotting and filtering system. 
+  
+  There is plenty room for visual improvement nonetheless, for example, there is no label for the color of the points that defines that green is a 3 pointer, and red is a 2 pointer. The missed or made shot tab could be removed and replaced with an updated aesthetic to the plot that makes it so made and missed shots are different symbols. The color scheme of the shots is not color blind friendly as well but that is countered by the fact you can hide and show 2 or 3 pointers, so people with red-green colorblindness still have accessibility. 
+
+```{r shiny ui, message=FALSE, warning=FALSE}
+# ui for shiny dashboard
+ui = fluidPage(
+  
+  # change the theme to be easier on the eyes
+  theme = shinytheme('darkly'),
+  
+    # title of shiny app
+    headerPanel("NBA 2017-2018 Season: Shooting Analysis"),
+        
+        sidebarPanel(
+            
+          # create a subset of the data that changes based on user input and narrows down the choices 
+            selectizeGroupUI(
+                id = "my-filters",
+                inline = FALSE,
+                params = list(
+                    team_name = list(inputId = "team_name",
+                                     title = "NBA Team",
+                                     placeholder = 'Select NBA Team'),
+                    
+                    name = list(inputId = "name",
+                                title = "Player", placeholder =
+                                  'Select a Player'),
+                    
+                    shot_type = list(inputId = "shot_type",
+                                     title = "2 PT or 3 PT",
+                                     placeholder = 'Select Value'),
+                    
+                    shot_made_flag = list(inputId = "shot_made_flag",
+                                          title = "Missed(0) or Made(1) Shot",
+                                          placeholder = 'Select Between All Shot Attempts 
+                                                         or Only Shots Made'),
+                    
+                    action_type = list(inputId = "action_type",
+                                       title = "Shot Type",
+                                       placeholder = 'Select Shot Type'))
+                ),
+            
+            status = "primary"
+            
+        ),
+    
+    mainPanel(
+    
+    # plot the court next to the user input
+    plotOutput(outputId = "court_plot", width = '800px')
+    )
+  
+)
+```
+
+
+## Algorithmic design:
+
+  Overall, the system runs smoothly considering the amount of data that is loaded in and filtered though when the user interacts. The only issue is the 3 to 5 second load time where the user is unable to interact with the drop downs or see the basketball court plot. The decision to use selectizeGroupUi and selectizeGroupServer, which in itself are javascript based, dramatically improves the stability of the dashboard. The selectizeGroup function allows the user to create custom real-time subsets of the data based on their input. This is best explained though example, so, if a user was to select a team from the first input, immediately the data would be filtered to include the players from that specific team. Take it a step further and when you click on a player the remaining three inputs are filtered as well to specifically that team's player and their pre-existing data that remains in the subsetted dataset. 
+
+## User evaluation:
+  I would test my system by trying to overload it or somehow create a loop in the inputs but i was unable to. When the application is first booted up, it actually displays every single shot from the 2017-18 season as there has been no filtering of the data yet, so it all is displayed. This way it operates as if it us cutting away with the ability to add data back.
+  
+  Overall, the run time in the beginning could be fixed by selecting the first item that pops up for each input by default, that way the user can change them all from there and it would reduce the time it takes for the graph to appear, but not necessarily reducing the initial load in time. I believe that the choice to use the selectizeGroup is worth the initial load in time as it overall allows the most flexibility by the user while still remaining stable and almost entirely free of errors.
+
+```{r server, message=FALSE, warning=FALSE}
+# server side of the app that allows the user interactions to affect the dataframe
+server <- function(input, output, session) {
+    
+  # allow the custom subset dataframe to be called
+    res_mod <- callModule(
+        module = selectizeGroupServer,
+        id = "my-filters",
+        data = data_csv,
+        vars = c("team_name", "name", "shot_type", "shot_made_flag", "action_type")
+        )
+    
+
+    # the code side of the plot that plots the users input by calling the subsetted dataframe
+    output$court_plot <- renderPlot({
+        data_i = res_mod()
+        data_i %>% ggplot(aes(x, y)) +
+            annotation_custom(court, -250, 250, -50, 420) +
+            geom_point(color = data_i$shot_type) +
+            xlim(-250, 250) +
+            ylim(-50, 420)
+        })
+
+}
+
+shinyApp(ui = ui, server = server)
+```
+
+## Future work
+  This dashboard could be improved in many aspects going forward, but ultimately it is at a very good place at the moment. My plans to improve it include adding the ability to change season which in turn would account for summer trades and new players to be added. From there a player tab could be added that allows the user to track a players stats through multiple season and track improvement as well as fix the errors that would occur from players transferring teams. So, all together an improved and more polished UI, historical data, more specific player information and statistics, and an improved and scalable court would be the ideal future improvements to add to the dashboard.
+
